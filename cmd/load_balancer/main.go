@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 )
@@ -15,23 +15,29 @@ func main() {
 			fmt.Sprintf("User-Agent: %v\n", r.Header.Get("User-Agent")) +
 			fmt.Sprintf("Accept: %v\n", r.Header.Get("Accept"))
 
-		respFromServer, err := http.Get("http://localhost:5000/")
-		if err != nil {
-			log.Println(err)
-		}
-
-		body, err := ioutil.ReadAll(respFromServer.Body)
-
-		if err != nil {
-			log.Fatal(err)
-		}
-
+		body := sendReq(r, "7842")
 		resp += "\n" + string(body)
-
-		fmt.Fprintf(w, resp)
-
+		fmt.Fprint(w, resp)
 	})
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
 
+}
+
+func sendReq(r *http.Request, port string) string {
+	c := http.Client{}
+	newReq, err := http.NewRequest(r.Method, "http://localhost:" + port, r.Body)
+	if err != nil {
+		log.Println(err)
+	}
+	resp, err := c.Do(newReq)
+	if err != nil {
+		log.Println(err)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return string(body)
 }
