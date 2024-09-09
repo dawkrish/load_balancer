@@ -5,3 +5,5 @@ lb:
 be: 
 	go build -o be ./cmd/backend_server/.
 
+clean:
+	rm be lb
