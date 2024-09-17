@@ -5,23 +5,29 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 )
 
 type ServerConfig struct {
 	requestID       int
 	availableServer string
-	servers         map[string][]int
+	servers         map[string]Server
 	numOfServers    int
+}
+
+type Server struct {
+	requests []int
+	healthy  bool
 }
 
 func NewServerConfig() *ServerConfig {
 	return &ServerConfig{
 		requestID:       0,
 		availableServer: "",
-		servers: map[string][]int{
-			"8080": {},
-			"8081": {},
-			"8082": {},
+		servers: map[string]Server{
+			"8080": {healthy: true},
+			"8081": {healthy: true},
+			"8082": {healthy: true},
 		},
 		numOfServers: 3,
 	}
@@ -37,9 +43,11 @@ func main() {
 			fmt.Sprintf("User-Agent: %v\n", r.Header.Get("User-Agent")) +
 			fmt.Sprintf("Accept: %v\n", r.Header.Get("Accept"))
 
+		srvCfg.healthCheck()
 		srvCfg.roundRobin()
-		cSrv := srvCfg.availableServer
+		fmt.Println(srvCfg)
 
+		cSrv := srvCfg.availableServer
 		body := sendReq(r, cSrv)
 		resp += "\n" + string(body)
 		fmt.Fprint(w, resp)
@@ -48,6 +56,7 @@ func main() {
 	log.Fatal(http.ListenAndServe(":7811", nil))
 }
 
+// Only healthy servers can come to this!
 func sendReq(r *http.Request, port string) string {
 	c := http.Client{}
 	newReq, err := http.NewRequest(r.Method, "http://localhost:"+port, r.Body)
@@ -66,15 +75,49 @@ func sendReq(r *http.Request, port string) string {
 	return string(body)
 }
 
-func (c *ServerConfig) roundRobin() {
-	c.requestID++
-	minK, minV := "", (c.requestID-1)/c.numOfServers
-	for k, v := range c.servers {
-		if len(v) <= minV {
+// Apply for healthy servers only
+func (cfg *ServerConfig) roundRobin() {
+	if cfg.numOfServers <= 0 {
+		log.Println("no server is healthy:/")
+		os.Exit(1)
+	}
+
+	cfg.requestID++
+	minK, minV := "", (cfg.requestID-1)/cfg.numOfServers
+
+	for k, v := range cfg.servers {
+		if v.healthy == false {
+			continue
+		}
+		if len(v.requests) <= minV {
 			minK = k
 			break
 		}
 	}
-	c.servers[minK] = append(c.servers[minK], c.requestID)
-	c.availableServer = minK
+
+	reqs := append(cfg.servers[minK].requests, cfg.requestID)
+	s := Server{requests: reqs, healthy: true}
+	cfg.servers[minK] = s
+
+	cfg.availableServer = minK
+}
+
+func (cfg *ServerConfig) healthCheck() {
+	client := http.Client{}
+	var countHealthy = 0
+
+	for port, srv := range cfg.servers {
+		resp, err := client.Get("http://localhost:" + port)
+		log.Println(resp, err)
+
+		if err != nil || resp.StatusCode != 200 {
+			srv.healthy = false
+			cfg.servers[port] = srv
+		} else {
+			srv.healthy = true
+			cfg.servers[port] = srv
+			countHealthy++
+		}
+	}
+	cfg.numOfServers = countHealthy
 }
