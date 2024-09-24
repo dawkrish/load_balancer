@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 )
 
 type ServerConfig struct {
@@ -35,6 +36,7 @@ func NewServerConfig() *ServerConfig {
 
 func main() {
 	srvCfg := NewServerConfig()
+	go srvCfg.healthCheck(2 * time.Second)
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		resp := fmt.Sprintf("Received request from %v\n", r.Host) +
@@ -43,7 +45,6 @@ func main() {
 			fmt.Sprintf("User-Agent: %v\n", r.Header.Get("User-Agent")) +
 			fmt.Sprintf("Accept: %v\n", r.Header.Get("Accept"))
 
-		srvCfg.healthCheck()
 		srvCfg.roundRobin()
 		fmt.Println(srvCfg)
 
@@ -102,22 +103,25 @@ func (cfg *ServerConfig) roundRobin() {
 	cfg.availableServer = minK
 }
 
-func (cfg *ServerConfig) healthCheck() {
-	client := http.Client{}
-	var countHealthy = 0
+func (cfg *ServerConfig) healthCheck(delay time.Duration) {
+	for {
+		client := http.Client{}
+		var countHealthy = 0
 
-	for port, srv := range cfg.servers {
-		resp, err := client.Get("http://localhost:" + port)
-		log.Println(resp, err)
+		for port, srv := range cfg.servers {
+			resp, err := client.Get("http://localhost:" + port)
 
-		if err != nil || resp.StatusCode != 200 {
-			srv.healthy = false
-			cfg.servers[port] = srv
-		} else {
-			srv.healthy = true
-			cfg.servers[port] = srv
-			countHealthy++
+			if err != nil || resp.StatusCode != 200 {
+				srv.healthy = false
+				cfg.servers[port] = srv
+			} else {
+				srv.healthy = true
+				cfg.servers[port] = srv
+				countHealthy++
+			}
 		}
+		cfg.numOfServers = countHealthy
+		log.Println(cfg)
+		time.Sleep(delay)
 	}
-	cfg.numOfServers = countHealthy
 }
